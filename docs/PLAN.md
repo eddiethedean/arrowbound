@@ -4,13 +4,22 @@
 
 **ArrowBound is a constrained Pydantic model system for defining portable Apache Arrow data contracts.**
 
-ArrowBound combines familiar Python type annotations, Pydantic validation and constraints, deterministic Apache Arrow schemas, versioned ArrowBound portable constraint metadata, and dynamic access to the capabilities of the installed PyArrow runtime.
+ArrowBound combines familiar Python type annotations, Pydantic validation and constraints, deterministic Apache Arrow schemas, portable constraint metadata, and dynamic access to the capabilities of the installed PyArrow runtime.
 
-> **Python and Pydantic for authorship. PyArrow for types. ArrowBound for portable semantics. Apache Arrow for interchange.**
+> **Python and Pydantic for authorship and ingress validation. PyArrow for types. ArrowBound for portable semantics. Apache Arrow for interchange.**
 
 ## Core guarantee
 
 Users define contracts by inheriting from `arrowbound.BaseModel`. If ArrowBound accepts a model definition, it can deterministically produce its Apache Arrow schema. ArrowBound never silently degrades, substitutes, or discards requested semantics.
+
+When data is validated through an ArrowBound model, applicable Pydantic constraints are enforced before that data enters the Arrow substrate. ArrowBound then preserves the portable declarative form of those constraints in Arrow metadata so downstream consumers can understand the contract.
+
+This produces two complementary guarantees:
+
+1. **Boundary validation:** values that enter through ArrowBound model validation satisfied the declared applicable constraints at that boundary.
+2. **Constraint preservation:** the corresponding portable declarative contract can travel with the Arrow schema downstream.
+
+Arrow itself does not continuously revalidate ArrowBound constraints after ingress. Data constructed or mutated through other paths must not be assumed valid merely because the schema carries ArrowBound metadata.
 
 ## Basic developer experience
 
@@ -29,20 +38,6 @@ class Measurement(BaseModel):
 ```
 
 `Measurement.arrow_schema()` returns a normal `pyarrow.Schema` containing Arrow-native types, nullability and structure, plus ArrowBound metadata only where Arrow itself lacks the portable semantic.
-
-Apache Arrow does not provide a general-purpose constraint system for rules such as `minimum`, `maximum`, `pattern`, or string length. ArrowBound defines and preserves those portable declarative constraints in Arrow metadata. Apache Arrow transports that metadata but does not interpret or enforce it.
-
-Pydantic enforces applicable constraints when ArrowBound model instances are validated. Downstream ArrowBound-aware consumers may choose to interpret or enforce the same portable metadata. ArrowBound's core responsibility is definition and preservation, not general Arrow-table constraint execution.
-
-## Contract dimensions
-
-ArrowBound keeps three concepts separate:
-
-1. **Arrow schema semantics** — datatypes, nullability declarations, nested structure, decimal precision/scale, timestamp parameters, and other semantics represented natively by Apache Arrow.
-2. **ArrowBound portable constraints** — declarative validity rules that Arrow does not natively represent as a general constraint system.
-3. **ArrowBound metadata** — descriptive or domain semantics that are not necessarily validity rules.
-
-Native Arrow schema semantics always take precedence over duplicating the same information in ArrowBound metadata.
 
 ## Explicit type control
 
@@ -70,20 +65,21 @@ Users may freely mix `Arrow.*` and `pa.*`. Direct PyArrow datatypes are also the
 
 1. **Python first.** Ordinary Python annotations should handle ordinary contracts.
 2. **Pydantic first for constraints.** Do not invent new syntax when Pydantic already expresses the concept naturally.
-3. **PyArrow is the type system.** ArrowBound must not recreate or wrap Apache Arrow datatypes unnecessarily.
-4. **Explicit Arrow is optional.** Developers use `Arrow.*` or `pa.*` only when they want control beyond documented defaults.
-5. **`Arrow.*` preserves PyArrow identity.** Successful datatype helpers return real `pyarrow.DataType` values equivalent to their `pa.*` counterparts.
-6. **Direct PyArrow is first-class.** Compatible `pa.DataType` instances require no ArrowBound wrapper.
-7. **Installed PyArrow determines capabilities.** Runtime capability detection should be preferred over unnecessary release locking.
-8. **Never silently degrade.** If a requested representation cannot be honored, fail clearly.
-9. **Native Arrow semantics win.** Do not duplicate information in ArrowBound metadata that Arrow already represents.
-10. **ArrowBound portable constraints are not Arrow constraints.** They are ArrowBound-defined semantics carried through Arrow metadata.
-11. **Portable constraints are declarative.** Arbitrary Python validation logic is not a portable contract.
-12. **Definition is separate from enforcement.** ArrowBound defines and preserves portable constraints; Pydantic or downstream consumers may enforce them.
-13. **Escape hatches remain available.** Advanced users can access PyArrow types, namespaced custom constraints, and raw metadata.
-14. **ArrowBound defines; it does not execute.** Dataframes, databases, query engines, registries, and ETL systems remain outside the package.
-15. **Portability over convenience hacks.** Never make schema construction easier by making meaning ambiguous.
-16. **No unexplained gaps.** Every relevant PyArrow type and applicable Pydantic constraint should have a known support classification.
+3. **Validate at ArrowBound boundaries.** Applicable portable constraints should be enforced when data is validated through ArrowBound models.
+4. **Preserve the contract.** Portable constraint semantics should survive into Arrow metadata for downstream consumers.
+5. **Do not overclaim continuous validity.** ArrowBound validation establishes validity at a boundary, not forever after arbitrary mutation or alternate ingestion paths.
+6. **PyArrow is the type system.** ArrowBound must not recreate or wrap Apache Arrow datatypes unnecessarily.
+7. **Explicit Arrow is optional.** Developers use `Arrow.*` or `pa.*` only when they want control beyond documented defaults.
+8. **`Arrow.*` preserves PyArrow identity.** Successful datatype helpers return real `pyarrow.DataType` values equivalent to their `pa.*` counterparts.
+9. **Direct PyArrow is first-class.** Compatible `pa.DataType` instances require no ArrowBound wrapper.
+10. **Installed PyArrow determines capabilities.** Runtime capability detection should be preferred over unnecessary release locking.
+11. **Never silently degrade.** If a requested representation cannot be honored, fail clearly.
+12. **Native Arrow semantics win.** Do not duplicate information in ArrowBound metadata that Arrow already represents.
+13. **Portable constraints are declarative.** Arbitrary Python validation logic is not automatically a portable contract.
+14. **Escape hatches remain available.** Advanced users can access PyArrow types, namespaced custom constraints, and raw metadata.
+15. **ArrowBound defines and validates boundaries; it does not become an Arrow execution engine.** Dataframes, databases, query engines, registries, and ETL systems remain outside the package.
+16. **Portability over convenience hacks.** Never make schema construction easier by making meaning ambiguous.
+17. **No unexplained gaps.** Every relevant PyArrow type and applicable Pydantic constraint should have a known support classification.
 
 ## Public API direction
 
@@ -109,7 +105,9 @@ Potential low-level constraint escape hatch: `ArrowConstraint`. Primary model me
 
 ## Scope boundaries
 
-ArrowBound is deliberately not a dataframe library, ETL framework, ORM, query engine, schema registry, database migration system, Arrow table constraint-enforcement engine, engine integration layer, or arbitrary-Pydantic-to-Arrow converter. ArrowBound defines and preserves contracts; other systems consume them through Apache Arrow.
+ArrowBound is deliberately not a dataframe library, ETL framework, ORM, query engine, schema registry, database migration system, general Arrow-table constraint engine, engine integration layer, or arbitrary-Pydantic-to-Arrow converter.
+
+ArrowBound defines the contract, enforces applicable constraints when data crosses an ArrowBound model-validation boundary, and preserves portable constraint semantics for downstream Arrow consumers.
 
 ## Internal package shape
 
@@ -125,11 +123,11 @@ arrowbound/
 └── exceptions.py
 ```
 
-- `model.py`: constrained `BaseModel` and definition enforcement.
+- `model.py`: constrained `BaseModel`, definition enforcement, and boundary validation behavior inherited from Pydantic.
 - `schema.py`: Arrow schema compiler.
 - `types.py`: Python defaults, `Arrow.*` convenience facade, Python↔PyArrow compatibility.
 - `compatibility.py`: installed PyArrow capability detection and diagnostics.
-- `constraints.py`: Pydantic constraint extraction and normalization into ArrowBound portable constraints.
+- `constraints.py`: Pydantic constraint extraction, portability classification, and normalization.
 - `metadata.py`: metadata specification, canonical serialization, custom namespaces.
 - `exceptions.py`: public error hierarchy.
 
@@ -141,6 +139,6 @@ ArrowBound releases declare minimum Python, supported Pydantic range, minimum Py
 
 ## 1.0 definition
 
-By 1.0, default Python mappings are deterministic/documented; every built-in schema-definable PyArrow type has a known capability classification; direct `pa.DataType` and `Arrow.*` authoring are stable and equivalent where helpers overlap; runtime capability detection is reliable; ArrowBound portable declarative constraints are versioned/deterministic; metadata survives Arrow serialization round trips; equivalent models generate equivalent schemas/metadata; and generated schemas remain ordinary Apache Arrow schemas.
+By 1.0, default Python mappings are deterministic/documented; every built-in schema-definable PyArrow type has a known capability classification; direct `pa.DataType` and `Arrow.*` authoring are stable and equivalent where helpers overlap; runtime capability detection is reliable; applicable portable constraints are actually enforced during ArrowBound model validation; those constraints are versioned and deterministic in Arrow metadata; metadata survives Arrow serialization round trips; equivalent models generate equivalent schemas/metadata; and generated schemas remain ordinary Apache Arrow schemas.
 
-> **Natural when possible. Explicit when necessary. Portable always.**
+> **Validate at the boundary. Preserve the contract. Transport with Arrow.**
