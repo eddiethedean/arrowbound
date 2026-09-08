@@ -2,139 +2,88 @@
 
 ## Principle
 
-ArrowBound should dynamically use the capabilities of the installed PyArrow runtime rather than freezing itself to the exact PyArrow feature surface available when an ArrowBound release was published.
+ArrowBound dynamically uses the capabilities of the installed PyArrow runtime rather than freezing itself to the exact PyArrow feature surface available when an ArrowBound release was published.
 
-> **Installed PyArrow determines available Arrow capabilities. ArrowBound provides the authoring rules, compatibility checks, and diagnostics around them.**
+> **Installed PyArrow determines available Arrow capabilities. ArrowBound provides authoring rules, compatibility checks, and diagnostics around them.**
 
 ## Minimum supported PyArrow
 
-ArrowBound should declare a minimum supported PyArrow version for maintainability and testability.
+ArrowBound declares a minimum supported PyArrow version for maintainability and testability. Above that floor, it should generally avoid unnecessary upper bounds so newer PyArrow releases can expose newer capabilities.
 
-Above that floor, ArrowBound should generally avoid unnecessary upper bounds so newer PyArrow releases can expose newer capabilities.
+Release metadata should declare minimum Python, supported Pydantic range, minimum PyArrow, and ArrowBound metadata-spec version.
 
-Release metadata should declare:
+## PyArrow datatypes are first class
 
-- minimum Python version,
-- supported Pydantic range,
-- minimum PyArrow version,
-- ArrowBound metadata specification version.
+ArrowBound must accept compatible `pyarrow.DataType` instances directly in `Annotated` metadata. Users do not need to wrap them in an ArrowBound object.
 
-## Capability detection over version branching
+```python
+value: Annotated[int, pa.int32()]
+```
 
-Prefer runtime capability checks such as:
+This direct PyArrow path is a core part of ArrowBound's compatibility strategy, not merely an undocumented escape hatch.
+
+## Arrow.* preserves PyArrow datatype identity
+
+`Arrow.*` datatype helpers are a convenience facade over PyArrow factories. They return actual PyArrow datatypes rather than lazy ArrowBound datatype wrappers.
+
+```python
+Arrow.int32() == pa.int32()
+Arrow.timestamp("us") == pa.timestamp("us")
+```
+
+Users may freely mix `Arrow.*` and `pa.*` declarations. ArrowBound applies the same Python↔Arrow compatibility validation to both.
+
+## Capability detection
+
+ArrowBound should still prefer runtime capability detection over broad version branching when inspecting what the installed PyArrow supports.
 
 ```python
 factory = getattr(pyarrow, "string_view", None)
 ```
 
-over widespread logic such as:
+The presence of the public PyArrow capability is the primary source of truth. Version knowledge remains useful for diagnostics, generated documentation, and upgrade guidance.
+
+Because `Arrow.*` returns real PyArrow datatypes, datatype construction is intentionally not lazy. A direct call to a factory absent from the installed PyArrow may fail before model construction. ArrowBound should not sacrifice datatype identity merely to intercept that error path.
+
+If better preflight diagnostics are useful, add separate helpers such as:
 
 ```python
-if Version(pyarrow.__version__) >= ...:
-    ...
+Arrow.supports("string_view")
+Arrow.require("string_view")
 ```
 
-The presence of the public PyArrow capability is the primary source of truth. Version knowledge is still useful for diagnostics and upgrade guidance.
-
-## Lazy Arrow type specifications
-
-Explicit ArrowBound helpers should resolve lazily.
-
-```python
-Arrow.string_view()
-```
-
-should create an ArrowBound type specification rather than immediately calling `pyarrow.string_view()`.
-
-This lets ArrowBound control the error path when a capability is missing.
-
-Example error direction:
-
-```text
-ArrowBoundUnsupportedTypeError
-
-Arrow type 'string_view' is unavailable in installed PyArrow 15.x.
-
-This capability requires a newer PyArrow release.
-Upgrade PyArrow or choose another explicit Arrow representation.
-```
-
-Where ArrowBound knows the exact minimum version, it should include it.
+These helpers may provide version-aware guidance without changing what `Arrow.string_view()` returns when available.
 
 ## No silent substitution
 
-If a developer asks for an exact type, ArrowBound must honor that exact request or fail.
-
-Examples of forbidden behavior:
-
-- replacing `string_view` with `string`,
-- replacing `decimal32` with `decimal128`,
-- replacing a requested list-view representation with a normal list,
-- changing a requested integer width to another width.
-
-The requested Arrow contract is authoritative.
+If a developer asks for an exact type, ArrowBound must honor that exact request or fail. It must never replace string views with strings, one decimal width with another, list views with normal lists, or requested integer widths with other widths.
 
 ## Forward compatibility
 
-ArrowBound should distinguish:
+ArrowBound distinguishes ergonomic first-class support via `Arrow.*` from fundamental support for a `pyarrow.DataType`.
 
-1. first-class ergonomic support via `Arrow.*`, and
-2. fundamental ability to carry a built-in `pyarrow.DataType`.
+When a future PyArrow release adds a datatype before ArrowBound adds a corresponding helper, users should be able to use the PyArrow datatype directly where ArrowBound can validate its Python representation generically.
 
-When a future PyArrow release adds a datatype before ArrowBound adds a helper, advanced users should be able to supply an already-created `pyarrow.DataType` where compatibility can be validated generically.
-
-ArrowBound can later add:
-
-- ergonomic helper syntax,
-- Python compatibility rules,
-- documentation,
-- test coverage,
-- known minimum-version diagnostics.
+A later ArrowBound release can add convenience aliases, compatibility knowledge, documentation, and dedicated tests without having blocked early adopters.
 
 ## Compatibility axes
 
 ArrowBound has three independent compatibility surfaces:
 
-### Pydantic
+- **Pydantic:** Python authoring and local validation semantics.
+- **PyArrow:** available Arrow datatypes and constructors in the installed runtime.
+- **ArrowBound metadata specification:** portable constraints and descriptive semantics understood by ArrowBound-aware consumers.
 
-Determines the Python authoring and local validation semantics.
-
-### PyArrow
-
-Determines which Arrow datatypes and constructors are available in the installed runtime.
-
-### ArrowBound metadata specification
-
-Determines which portable constraints and descriptive semantics ArrowBound-aware consumers can interpret.
-
-These versions should remain intentionally independent.
+These versions remain intentionally independent.
 
 ## CI matrix
 
-CI should include at least:
-
-```text
-minimum supported PyArrow
-latest stable PyArrow
-newer/pre-release/nightly PyArrow where practical (non-blocking initially)
-```
-
-The purpose of the newest-runtime job is to identify upcoming API changes and newly available Arrow types early.
+CI should include the minimum supported PyArrow, latest stable PyArrow, and a newer/pre-release/nightly PyArrow where practical (initially non-blocking). Tests must cover both `Arrow.*` and direct `pa.*` annotations and assert equivalent resulting schemas.
 
 ## Environment diagnostics
 
-A small diagnostic API may be useful later, for example:
-
-```python
-arrowbound.compatibility()
-```
-
-returning package/runtime metadata such as ArrowBound, PyArrow, Pydantic, and metadata-spec versions.
-
-This is secondary to the core API and should not be required for normal use.
+A small diagnostic API may later expose ArrowBound, PyArrow, Pydantic, and metadata-spec versions. This remains secondary to the core contract-definition API.
 
 ## Upgrade guidance
 
-Compatibility errors should be actionable. When ArrowBound knows a missing type's first supported PyArrow release, errors should state the requirement rather than merely saying the type is missing.
-
-The capability registry should hold this compatibility knowledge for diagnostics, tests, and generated documentation, while PyArrow runtime introspection remains authoritative for actual availability.
+When ArrowBound itself detects an unavailable capability and knows its first supported PyArrow release, errors should state the requirement. The capability registry holds this compatibility knowledge for diagnostics, tests, and generated documentation, while runtime PyArrow introspection remains authoritative for actual availability.
