@@ -11,7 +11,7 @@ Application developer
 ArrowBound model
         │
         ├── Python/Pydantic authoring
-        ├── Arrow type resolution
+        ├── native PyArrow datatype resolution
         └── portable constraints/metadata
         │
         ▼
@@ -29,17 +29,7 @@ The package ends where the Arrow contract begins.
 
 ## Model hierarchy
 
-ArrowBound must own its model tree:
-
-```text
-pydantic.BaseModel
-        ↑
-arrowbound.BaseModel
-        ↑
-user contract models
-```
-
-An arbitrary `pydantic.BaseModel` is not a valid ArrowBound contract. Nested models must also inherit from `arrowbound.BaseModel` so the entire schema tree satisfies ArrowBound's deterministic representation guarantee.
+ArrowBound owns its model tree: `pydantic.BaseModel` → `arrowbound.BaseModel` → user contract models. An arbitrary `pydantic.BaseModel` is not a valid ArrowBound contract. Nested models must also inherit from `arrowbound.BaseModel` so the entire schema tree satisfies ArrowBound's deterministic representation guarantee.
 
 ## Compilation pipeline
 
@@ -51,7 +41,8 @@ arrowbound.BaseModel
    │
    ├── inspect Python annotations
    ├── inspect Pydantic field semantics
-   ├── resolve explicit Arrow escape hatches
+   ├── resolve documented default Arrow types
+   ├── accept explicit Arrow.* or pa.* DataTypes
    ├── validate Python↔Arrow compatibility
    ├── normalize portable constraints
    └── collect descriptive/custom metadata
@@ -67,6 +58,18 @@ Arrow schema compiler
    ▼
 pyarrow.Schema
 ```
+
+## PyArrow is the type system
+
+ArrowBound does not define wrapper datatypes. The physical/logical type substrate is `pyarrow.DataType`.
+
+`Arrow.*` is a convenience namespace over PyArrow factories and returns actual PyArrow datatypes. Direct `pa.*` datatypes are equally first class.
+
+```python
+Arrow.int32() == pa.int32()
+```
+
+A model may freely mix the two forms. This prevents ArrowBound from becoming a second Arrow type system and gives users immediate access to newly introduced PyArrow datatypes when ArrowBound can validate them generically.
 
 ## Separation of concerns
 
@@ -88,66 +91,24 @@ These must remain distinct.
 
 ## Native Arrow semantics first
 
-ArrowBound should never duplicate information already represented by Arrow.
-
-Examples:
-
-- `T | None` maps to Arrow field nullability.
-- decimal precision and scale belong in the decimal datatype.
-- timestamp timezone and unit belong in the timestamp datatype.
-- list item types belong in the list datatype.
-- dictionary encoding belongs in the dictionary datatype.
-
-ArrowBound metadata should only fill semantic gaps.
+ArrowBound never duplicates information already represented by Arrow. `T | None` maps to field nullability; decimal precision/scale stay in the decimal datatype; timestamp timezone/unit stay in the timestamp datatype; list item types stay in the list datatype; dictionary encoding stays in the dictionary datatype. ArrowBound metadata fills only semantic gaps.
 
 ## Early validation
 
-ArrowBound should reject invalid contract definitions as early as practical, ideally during model class construction.
+ArrowBound should reject invalid contract definitions as early as practical, ideally during model class construction. This includes unsupported arbitrary Python types, arbitrary nested Pydantic models, incompatible Python and explicit PyArrow types, conflicting annotations, unsupported unions, and malformed custom constraint metadata.
 
-Examples of errors that should be caught early:
-
-- unsupported arbitrary Python types,
-- arbitrary nested Pydantic models,
-- incompatible Python and explicit Arrow types,
-- invalid or conflicting Arrow annotations,
-- unsupported unions,
-- malformed custom constraint metadata.
-
-Runtime PyArrow capability availability may also be resolved during model construction where safe, or deferred to schema resolution when lazy behavior is needed for import-time ergonomics.
+A datatype factory that does not exist in the installed PyArrow may fail at the point the user calls it. ArrowBound should not introduce lazy wrapper datatypes solely to intercept this. Separate capability helpers may provide preflight diagnostics.
 
 ## Failure behavior
 
-Errors should identify:
-
-- model,
-- full nested field path,
-- Python annotation,
-- requested Arrow representation,
-- installed PyArrow version when relevant,
-- unsupported or unavailable capability,
-- recommended remediation.
-
-ArrowBound must never silently substitute a different Arrow representation.
+ArrowBound-controlled errors should identify the model, full nested field path, Python annotation, requested Arrow representation, installed PyArrow version when relevant, unsupported/unavailable capability, and recommended remediation. ArrowBound must never silently substitute a different representation.
 
 ## Forward compatibility
 
-ArrowBound should distinguish ergonomic support from fundamental runtime support.
+A future PyArrow type may not yet have an `Arrow.some_new_type()` convenience helper. Users should still be able to pass the actual `pa.some_new_type(...)` result directly where ArrowBound can safely preserve and validate it.
 
-A future PyArrow type may not yet have an `Arrow.some_new_type()` helper in ArrowBound. Advanced users should still be able to pass an already-created `pyarrow.DataType` where ArrowBound can safely preserve and validate it.
-
-This keeps ArrowBound thin over PyArrow instead of turning it into a second Arrow type system.
+This direct PyArrow path is a foundational forward-compatibility mechanism.
 
 ## Architectural non-goals
 
-Do not add the following to the core architecture without a separate project-level decision:
-
-- dataframe execution,
-- query compilation,
-- persistence,
-- database schema migration,
-- schema registry/network service,
-- engine-specific adapters,
-- arbitrary runtime data validation against Arrow tables,
-- plugin systems.
-
-These concerns may consume ArrowBound schemas externally.
+Do not add dataframe execution, query compilation, persistence, database migration, schema registries, engine-specific adapters, arbitrary Arrow-table validation, or plugin systems to the core without a separate project-level decision. These concerns may consume ArrowBound schemas externally.
