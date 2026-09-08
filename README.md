@@ -4,7 +4,7 @@
 
 ArrowBound lets developers define Arrow-backed data contracts using familiar Python and Pydantic syntax while preserving deterministic Apache Arrow schemas and portable declarative semantics across system boundaries.
 
-> **Python and Pydantic for authorship. PyArrow for types. ArrowBound for portable semantics. Apache Arrow for interchange.**
+> **Python and Pydantic for authorship and ingress validation. PyArrow for types. ArrowBound for portable semantics. Apache Arrow for interchange.**
 
 ## Core idea
 
@@ -22,15 +22,22 @@ class Customer(BaseModel):
     age: Annotated[int, Field(ge=0, le=150)]
 ```
 
-ArrowBound compiles the model into a deterministic `pyarrow.Schema`:
+When data is validated through an ArrowBound model, Pydantic enforces the declared constraints before that data enters the Arrow substrate.
+
+ArrowBound then compiles the model into a deterministic `pyarrow.Schema`:
 
 ```python
 schema = Customer.arrow_schema()
 ```
 
-Python types receive documented Arrow defaults. Pydantic declarative constraints that Apache Arrow does not natively represent are normalized into versioned **ArrowBound portable constraint metadata** attached to the Arrow schema or fields.
+Python types receive documented Arrow defaults. Pydantic declarative constraints that Apache Arrow does not natively represent are normalized into versioned **ArrowBound portable constraint metadata** attached to Arrow fields or schemas.
 
-Apache Arrow transports that metadata but does not interpret or enforce ArrowBound constraints. Pydantic enforces applicable constraints when ArrowBound model instances are validated; other consumers may choose to interpret or enforce the portable metadata downstream.
+This gives ArrowBound two related roles:
+
+1. **Ingress enforcement** — applicable constraints are enforced by Pydantic when data is validated through ArrowBound models.
+2. **Constraint communication** — those portable declarative constraints are preserved in Arrow metadata so downstream systems can understand the contract.
+
+Apache Arrow transports that metadata but does not continuously re-enforce ArrowBound constraints after data has entered the Arrow substrate. A downstream ArrowBound-aware consumer may choose to interpret or enforce them again.
 
 Developers only reach for explicit Arrow declarations when they need precise control over the underlying Arrow representation:
 
@@ -57,6 +64,7 @@ class Measurement(BaseModel):
 
 - ArrowBound models must inherit from `arrowbound.BaseModel`.
 - If ArrowBound accepts a model definition, it can deterministically produce its Arrow schema.
+- Data validated through ArrowBound models is checked against applicable Pydantic constraints before entering the Arrow substrate.
 - Ordinary Python types use stable, documented Arrow defaults.
 - Pydantic constraints describe validity and do not silently change physical Arrow types.
 - `Arrow.*` and direct `pyarrow.DataType` declarations are optional escape hatches, not the required authoring interface.
@@ -64,11 +72,11 @@ class Measurement(BaseModel):
 - Unsupported or unavailable Arrow features fail clearly; ArrowBound never silently degrades a requested representation.
 - Native Arrow schema semantics are used whenever Arrow already represents the concept.
 - ArrowBound portable constraints are stored as versioned, language-neutral Arrow metadata.
-- ArrowBound does not claim that Apache Arrow enforces those portable constraints.
+- Arrow carries ArrowBound constraint metadata downstream; downstream systems may enforce it, but Arrow itself does not act as a general constraint engine.
 
 ## Project scope
 
-ArrowBound defines and preserves contracts. It is intentionally **not** a dataframe library, ETL framework, ORM, query engine, schema registry, migration system, Arrow table constraint-enforcement engine, or engine-specific integration layer.
+ArrowBound defines, enforces at model-validation boundaries, and preserves portable contracts. It is intentionally **not** a dataframe library, ETL framework, ORM, query engine, schema registry, migration system, general Arrow table constraint-enforcement engine, or engine-specific integration layer.
 
 ## Planning documents
 
@@ -84,4 +92,4 @@ ArrowBound defines and preserves contracts. It is intentionally **not** a datafr
 
 ## Guiding principle
 
-> **Natural when possible. Explicit when necessary. Portable always.**
+> **Validate at the boundary. Preserve the contract. Transport with Arrow.**
