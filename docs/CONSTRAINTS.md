@@ -1,12 +1,14 @@
-# ArrowBound Constraints
+# ArrowBound Portable Constraints
 
 ## Principle
 
-Constraints should feel natural to Pydantic users.
+Apache Arrow does **not** provide a general-purpose data constraint system for rules such as numeric bounds, string lengths, regex patterns, or allowed-value sets.
+
+ArrowBound therefore defines its own **portable declarative constraint vocabulary** and stores those semantics in Arrow field/schema metadata when Arrow has no native representation for them.
+
+> **Pydantic first for authoring. ArrowBound for portable constraint representation. Apache Arrow for transport.**
 
 ArrowBound should reuse ordinary Pydantic declarations whenever they already express the required semantics and only introduce ArrowBound-specific syntax for genuinely missing portable concepts.
-
-> **Pydantic first for constraints. ArrowBound-specific constraints only where necessary.**
 
 ## Natural authoring
 
@@ -24,6 +26,34 @@ class Product(BaseModel):
 
 Users should not have to repeat the same semantics in a second ArrowBound constraint API.
 
+## What Arrow does and does not enforce
+
+Apache Arrow represents native schema semantics such as datatype structure, field nullability declarations, decimal precision/scale, timestamp parameters, nested types, dictionary encodings, and other datatype parameters.
+
+Those are **Arrow schema semantics**, not ArrowBound portable constraints.
+
+ArrowBound portable constraints include declarative rules such as:
+
+```text
+minimum
+maximum
+exclusive_minimum
+exclusive_maximum
+multiple_of
+min_length
+max_length
+pattern
+allowed_values
+min_items
+max_items
+```
+
+Apache Arrow transports ArrowBound metadata but does not interpret or enforce these rules.
+
+Pydantic enforces applicable rules when ArrowBound model instances are validated. A downstream ArrowBound-aware consumer may also choose to interpret or enforce them.
+
+ArrowBound itself is primarily responsible for **definition, normalization, and preservation**, not for becoming a general Arrow-table constraint execution engine.
+
 ## Normalization
 
 Pydantic syntax is the Python authoring interface, but Pydantic-specific names should not leak into the portable format.
@@ -34,48 +64,36 @@ For example:
 Field(ge=0, lt=100)
 ```
 
-should normalize to language-neutral semantics such as:
+normalizes to language-neutral semantics such as:
 
 ```text
 minimum: 0
 exclusive_maximum: 100
 ```
 
-Candidate normalized vocabulary includes:
-
-- `minimum`
-- `maximum`
-- `exclusive_minimum`
-- `exclusive_maximum`
-- `multiple_of`
-- `min_length`
-- `max_length`
-- `pattern`
-- `allowed_values`
-- `min_items`
-- `max_items`
-
 The final vocabulary should be formalized in the metadata specification.
 
-## Native, portable, local, unsupported
+## Constraint capability classifications
 
-Every applicable declarative Pydantic constraint should receive a capability classification:
+Every applicable Pydantic semantic should receive a clear classification:
 
-### NATIVE
+### ARROW_NATIVE
 
-The semantic already exists directly in Arrow and requires no ArrowBound metadata.
+The semantic is already represented by the Arrow schema/type system and therefore does not require ArrowBound constraint metadata.
 
-Example: optionality maps to Arrow field nullability.
+Examples include field nullability and datatype parameters such as decimal precision/scale.
+
+This classification does **not** mean Arrow provides a general constraint-enforcement engine. It means Arrow already carries the relevant schema semantic natively.
 
 ### PORTABLE
 
-ArrowBound can completely represent the declarative semantic in versioned portable metadata.
+ArrowBound can completely represent the declarative semantic in versioned, language-neutral metadata.
 
-Examples: numeric bounds, string length, regex patterns, `multiple_of`, allowed values.
+Examples include numeric bounds, string length, regex patterns, `multiple_of`, and allowed values.
 
 ### LOCAL
 
-Pydantic can enforce the rule in Python, but the behavior cannot be represented as a language-neutral ArrowBound contract.
+Pydantic can enforce the behavior in Python, but the behavior cannot be represented as a language-neutral ArrowBound contract.
 
 Example: arbitrary `@field_validator` Python logic.
 
@@ -97,7 +115,7 @@ This keeps validity semantics independent from storage semantics.
 
 ## ArrowBound-specific constraints
 
-Pydantic does not naturally express every declarative semantic that may be useful in an Arrow contract. ArrowBound may add typed annotations conservatively:
+Pydantic does not naturally express every declarative semantic that may be useful in a portable data contract. ArrowBound may add typed annotations conservatively:
 
 ```python
 from arrowbound import Constraints
@@ -130,7 +148,7 @@ ArrowConstraint(
 )
 ```
 
-Custom constraints must be namespaced to prevent collisions. ArrowBound should preserve them deterministically without claiming to validate their domain semantics.
+Custom constraints must be namespaced to prevent collisions. ArrowBound preserves them deterministically without claiming to understand or enforce their domain semantics.
 
 ## Validators
 
@@ -142,7 +160,7 @@ def validate_name(cls, value):
     ...
 ```
 
-However, executable Python validation logic is not portable merely because it lives on an ArrowBound model.
+Executable Python validation logic is not portable merely because it lives on an ArrowBound model.
 
 ArrowBound must clearly distinguish:
 
@@ -156,6 +174,6 @@ A local validator only becomes part of the portable contract if its semantics ar
 
 ## Future relational constraints
 
-Concepts such as primary keys, foreign keys, composite keys, and relational uniqueness should not be assumed part of the core v1 constraint vocabulary merely because they are useful in databases.
+Concepts such as primary keys, foreign keys, composite keys, and relational uniqueness should not be assumed part of the core v1 vocabulary merely because they are useful in databases.
 
 They are broader relational-contract concepts and should be evaluated separately to avoid expanding ArrowBound into a database schema system.
