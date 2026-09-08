@@ -32,134 +32,102 @@ Additional deterministic defaults should be defined for `time`, `Decimal`, `UUID
 
 ## Defaults are schema behavior
 
-Default mappings must be:
+Default mappings must be stable, documented, deterministic, and independent of runtime data values. ArrowBound must not inspect values and opportunistically narrow a type.
 
-- stable,
-- documented,
-- deterministic,
-- independent of runtime data values.
-
-ArrowBound must not inspect values and opportunistically narrow a type.
-
-For example:
-
-```python
-count: int
-```
-
-always maps to the documented integer default. It must not become `int8`, `uint16`, or another narrower integer depending on observed values.
+For example, `count: int` always maps to the documented integer default. It must not become `int8`, `uint16`, or another narrower integer depending on observed values.
 
 ## Constraints never change physical types implicitly
 
-```python
-quantity: Annotated[int, Field(ge=0)]
-```
+`quantity: Annotated[int, Field(ge=0)]` still maps to `int64` by default. The non-negative rule is a constraint, not a request for `uint64`. Changing a validation rule must not unexpectedly change an interchange schema.
 
-still maps to `int64` by default. The non-negative rule is a constraint, not a request for `uint64`.
+## Explicit Arrow types are first-class PyArrow datatypes
 
-Changing a validation rule must not unexpectedly change an interchange schema.
-
-## Explicit Arrow escape hatch
-
-Users who need exact Arrow semantics may opt in:
+Users who need exact Arrow semantics may opt in with either ArrowBound's `Arrow.*` convenience namespace or PyArrow directly.
 
 ```python
 from typing import Annotated
-
+import pyarrow as pa
 from arrowbound import Arrow, BaseModel
-
 
 class Measurement(BaseModel):
     sequence: Annotated[int, Arrow.uint32()]
-    value: Annotated[float, Arrow.float32()]
+    value: Annotated[float, pa.float32()]
 ```
 
-Parameterized examples:
+`Arrow.*` must not define wrapper datatype objects. When a corresponding PyArrow factory exists, it returns the actual `pyarrow.DataType` produced by that factory.
 
 ```python
-Arrow.timestamp("ns", tz="UTC")
-Arrow.decimal128(18, 6)
-Arrow.fixed_size_binary(16)
-Arrow.large_list(Arrow.string())
-Arrow.dictionary(Arrow.int16(), Arrow.string(), ordered=True)
+Arrow.int32() == pa.int32()
+# True
 ```
 
-The `Arrow.*` surface should be a thin lazy interface over PyArrow factories rather than a competing type implementation.
+Conceptually, `Arrow.int32` is a convenience alias/facade over `pa.int32`, not an ArrowBound implementation of `int32`.
 
-## Direct PyArrow escape hatch
+Parameterized helpers follow the same rule:
 
-Advanced users may provide an already-created `pyarrow.DataType`:
+```python
+Arrow.timestamp("ns", tz="UTC") == pa.timestamp("ns", tz="UTC")
+Arrow.decimal128(18, 6) == pa.decimal128(18, 6)
+Arrow.large_list(pa.string()) == pa.large_list(pa.string())
+```
+
+Users may freely mix `Arrow.*` and `pa.*` types within the same model.
+
+## Direct PyArrow support
+
+Any compatible built-in `pyarrow.DataType` is a first-class explicit type annotation. It does not need to be wrapped in `Arrow(...)`.
 
 ```python
 import pyarrow as pa
 
-
 class Record(BaseModel):
-    value: Annotated[int, Arrow(pa.int32())]
+    small: Annotated[int, pa.int16()]
+    count: Annotated[int, Arrow.uint64()]
+    payload: Annotated[bytes, pa.large_binary()]
 ```
 
-This is especially useful for new PyArrow datatypes that ArrowBound has not yet wrapped ergonomically.
+This direct path is also the primary forward-compatibility escape hatch for newly introduced PyArrow datatypes that ArrowBound has not yet exposed through `Arrow.*`.
+
+## Role of the Arrow namespace
+
+`Arrow.*` exists for discoverability, a stable ArrowBound-facing convenience surface, documentation, and optional compatibility helpers. It must not become a second type system.
+
+If an `Arrow.*` datatype helper is available, its successful result should be the same PyArrow datatype the corresponding `pa.*` call would produce.
+
+This means datatype construction itself is not lazy. If a type factory does not exist in the installed PyArrow version, direct `pa.*` usage may naturally fail before ArrowBound can provide model-level diagnostics. ArrowBound may provide separate capability helpers such as `Arrow.supports(...)` or `Arrow.require(...)` if useful, without changing datatype identity.
 
 ## Python↔Arrow compatibility
 
-Explicit Arrow representations must agree with the Python/Pydantic representation.
+Explicit Arrow representations must agree with the Python/Pydantic representation regardless of whether they came from `Arrow.*` or `pa.*`.
 
 Valid:
 
 ```python
 value: Annotated[int, Arrow.int16()]
+value2: Annotated[int, pa.int16()]
 ```
 
 Invalid:
 
 ```python
-value: Annotated[str, Arrow.int16()]
+value: Annotated[str, pa.int16()]
 ```
 
 ArrowBound should maintain compatibility rules at the semantic family level rather than merely comparing exact types.
 
 ## Nested models
 
-Nested contract models must inherit from `arrowbound.BaseModel`:
-
-```python
-class Coordinates(BaseModel):
-    latitude: float
-    longitude: float
-
-
-class Event(BaseModel):
-    location: Coordinates
-```
-
-This maps naturally to an Arrow struct. Arbitrary nested `pydantic.BaseModel` classes should be rejected because ArrowBound cannot guarantee their complete substrate semantics.
+Nested contract models must inherit from `arrowbound.BaseModel`. They map naturally to Arrow structs. Arbitrary nested `pydantic.BaseModel` classes should be rejected because ArrowBound cannot guarantee their complete substrate semantics.
 
 ## Complete PyArrow coverage goal
 
-ArrowBound should strive to support every built-in schema-definable datatype exposed by the installed supported PyArrow runtime, including:
+ArrowBound should strive to support every built-in schema-definable datatype exposed by the installed supported PyArrow runtime, including null/boolean, all integer and floating widths, binary/string variants and views, decimals, temporal types, lists and list views, maps, structs, unions, dictionary encoding, run-end encoding, canonical extension types, and future built-in PyArrow datatypes.
 
-- null and boolean,
-- all signed and unsigned integer widths,
-- all floating-point widths,
-- binary, large binary, binary views, fixed-size binary,
-- string, large string, string views,
-- decimal families,
-- dates, times, timestamps, durations, intervals,
-- lists, large lists, fixed-size lists, list views and large list views,
-- maps and structs,
-- sparse and dense unions,
-- dictionary encoding,
-- run-end encoding,
-- canonical extension types,
-- future built-in PyArrow datatypes where the runtime exposes them.
-
-Not all types need a Python shorthand. Full coverage can be achieved through a combination of documented defaults, `Arrow.*` helpers, and direct `pyarrow.DataType` escape hatches.
+Not all types need a Python shorthand or an `Arrow.*` helper immediately. Full coverage can be achieved through documented Python defaults plus first-class direct `pyarrow.DataType` support.
 
 ## Ambiguous mappings
 
-ArrowBound should fail rather than guess when no stable default can be defined.
-
-For example, `Decimal` requires an explicit documented policy for precision and scale. If Pydantic metadata cannot deterministically supply enough information, ArrowBound should require an explicit Arrow representation instead of silently inventing precision.
+ArrowBound should fail rather than guess when no stable Python default can be defined. For example, `Decimal` requires an explicit documented policy for precision and scale. If Pydantic metadata cannot deterministically supply enough information, ArrowBound should require an explicit Arrow representation instead of silently inventing precision.
 
 ## Stability policy
 
