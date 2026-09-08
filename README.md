@@ -2,9 +2,9 @@
 
 **A constrained Pydantic model system for defining portable Apache Arrow data contracts.**
 
-ArrowBound lets developers define Arrow-backed data contracts using familiar Python and Pydantic syntax while preserving deterministic Apache Arrow schemas and portable declarative constraints.
+ArrowBound lets developers define Arrow-backed data contracts using familiar Python and Pydantic syntax while preserving deterministic Apache Arrow schemas and portable declarative semantics across system boundaries.
 
-> **Python and Pydantic for authorship. PyArrow for types. ArrowBound for portability. Apache Arrow for interchange.**
+> **Python and Pydantic for authorship. PyArrow for types. ArrowBound for portable semantics. Apache Arrow for interchange.**
 
 ## Core idea
 
@@ -28,16 +28,30 @@ ArrowBound compiles the model into a deterministic `pyarrow.Schema`:
 schema = Customer.arrow_schema()
 ```
 
-Python types receive documented Arrow defaults. Pydantic constraints are normalized into portable ArrowBound metadata. Developers only reach for explicit Arrow declarations when they need precise control over the underlying Arrow representation:
+Python types receive documented Arrow defaults. Pydantic declarative constraints that Apache Arrow does not natively represent are normalized into versioned **ArrowBound portable constraint metadata** attached to the Arrow schema or fields.
+
+Apache Arrow transports that metadata but does not interpret or enforce ArrowBound constraints. Pydantic enforces applicable constraints when ArrowBound model instances are validated; other consumers may choose to interpret or enforce the portable metadata downstream.
+
+Developers only reach for explicit Arrow declarations when they need precise control over the underlying Arrow representation:
 
 ```python
-from arrowbound import Arrow
+from typing import Annotated
+import pyarrow as pa
+from arrowbound import Arrow, BaseModel
 
 
 class Measurement(BaseModel):
     sequence: Annotated[int, Arrow.uint32()]
-    value: Annotated[float, Arrow.float32()]
+    value: Annotated[float, pa.float32()]
 ```
+
+`Arrow.*` is a convenience facade over PyArrow datatypes, not a second type system. Direct `pa.*` datatypes are equally first-class.
+
+## Three parts of an ArrowBound contract
+
+- **Arrow schema semantics** — datatype, nullability, nested structure, decimal precision/scale, timestamp parameters, and other semantics Apache Arrow represents natively.
+- **ArrowBound portable constraints** — declarative validity rules such as numeric bounds or string lengths that Arrow itself does not natively encode as a general constraint system.
+- **ArrowBound metadata** — descriptive or domain semantics such as units or semantic labels that are not necessarily validity rules.
 
 ## Core guarantees
 
@@ -45,15 +59,16 @@ class Measurement(BaseModel):
 - If ArrowBound accepts a model definition, it can deterministically produce its Arrow schema.
 - Ordinary Python types use stable, documented Arrow defaults.
 - Pydantic constraints describe validity and do not silently change physical Arrow types.
-- Explicit `Arrow.*` declarations are optional escape hatches, not the required authoring interface.
+- `Arrow.*` and direct `pyarrow.DataType` declarations are optional escape hatches, not the required authoring interface.
 - ArrowBound dynamically uses the capabilities of the installed PyArrow runtime.
-- Unsupported or unavailable Arrow features fail with actionable errors; ArrowBound never silently degrades a requested representation.
-- Native Arrow semantics are used whenever Arrow already represents the concept.
-- Portable constraints are stored as versioned, language-neutral Arrow metadata.
+- Unsupported or unavailable Arrow features fail clearly; ArrowBound never silently degrades a requested representation.
+- Native Arrow schema semantics are used whenever Arrow already represents the concept.
+- ArrowBound portable constraints are stored as versioned, language-neutral Arrow metadata.
+- ArrowBound does not claim that Apache Arrow enforces those portable constraints.
 
 ## Project scope
 
-ArrowBound defines contracts. It is intentionally **not** a dataframe library, ETL framework, ORM, query engine, schema registry, migration system, or engine-specific integration layer.
+ArrowBound defines and preserves contracts. It is intentionally **not** a dataframe library, ETL framework, ORM, query engine, schema registry, migration system, Arrow table constraint-enforcement engine, or engine-specific integration layer.
 
 ## Planning documents
 
