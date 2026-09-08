@@ -2,140 +2,93 @@
 
 ## V0.1 — Foundation
 
-Prove the core architecture with:
-
-- constrained `BaseModel`,
-- documented Python→Arrow defaults,
-- `Arrow.*` lazy type specifications,
-- direct `pyarrow.DataType` escape hatch,
-- runtime PyArrow capability detection,
-- `arrow_schema()`,
-- nested ArrowBound models,
-- nullability,
-- core collections,
-- natural Pydantic constraint extraction,
-- versioned ArrowBound constraint metadata,
-- descriptive metadata escape hatch,
-- clear unsupported/unavailable errors,
-- initial capability registry and audit infrastructure.
-
-The goal is not complete type coverage yet; it is to prove the invariant that accepted models compile deterministically.
+Prove the core architecture with constrained `BaseModel`, documented Python→Arrow defaults, real PyArrow-backed `Arrow.*` convenience helpers, direct `pyarrow.DataType` support, runtime PyArrow capability detection, `arrow_schema()`, nested ArrowBound models, natural Pydantic constraint extraction/enforcement at model boundaries, versioned ArrowBound constraint metadata, metadata escape hatches, clear errors, and initial capability audit infrastructure.
 
 ## V0.2 — Complete built-in type coverage
 
-Systematically close the PyArrow capability matrix across:
+Systematically close the PyArrow capability matrix across numeric, binary/string, decimal, temporal, collection, map, struct, union, dictionary, run-end encoded, canonical extension, and other built-in schema-definable types available in supported runtimes.
 
-- all numeric types,
-- all binary/string variants,
-- all decimal types,
-- all temporal types,
-- all list variants,
-- maps,
-- structs,
-- dense/sparse unions,
-- dictionary encoding,
-- run-end encoding,
-- canonical extension types,
-- other built-in schema-definable types available in supported runtimes.
-
-Every type must be classified as `DEFAULT`, `SUPPORTED`, `RUNTIME`, `UNAVAILABLE`, or `UNSUPPORTED` with a technical reason.
+Every type must have a known capability classification and no unexplained gaps.
 
 ## V0.3 — Complete declarative constraint coverage
 
-Audit Pydantic's applicable declarative constraint surface.
-
-Every constraint must be classified as:
-
-- `NATIVE`,
-- `PORTABLE`,
-- `LOCAL`,
-- `UNSUPPORTED` with a technical reason.
-
-Complete the ArrowBound constraint vocabulary and stabilize canonical serialization.
-
-Add ArrowBound-native constraints only where Pydantic lacks a natural way to express a genuinely portable semantic.
+Audit Pydantic's applicable declarative constraint surface. Every semantic must be classified as `ARROW_NATIVE`, `PORTABLE`, `LOCAL`, or `UNSUPPORTED` with a technical reason. Complete the ArrowBound portable constraint vocabulary and stabilize canonical serialization.
 
 ## V0.4 — Advanced Arrow semantics
 
-Harden interoperability for difficult Arrow representations, including:
-
-- dense and sparse unions,
-- dictionary encoding,
-- run-end encoding,
-- list views,
-- nested combinations of advanced types,
-- canonical extension types.
-
-Define clear Python/Pydantic representations and compatibility rules for each.
+Harden interoperability for difficult Arrow representations including unions, dictionary encoding, run-end encoding, list views, nested advanced types, and canonical extension types. Define clear Python/Pydantic compatibility rules for each.
 
 ## V0.5 — Portability specification
 
-Extract the ArrowBound metadata representation into an implementation-independent specification covering:
-
-- metadata namespace,
-- metadata versioning,
-- canonical serialization,
-- constraint vocabulary,
-- descriptive metadata,
-- custom namespaces,
-- unknown constraint behavior,
-- forward compatibility expectations.
+Extract the ArrowBound metadata representation into an implementation-independent specification covering namespace, versioning, canonical serialization, constraint vocabulary, descriptive metadata, custom namespaces, unknown semantics, and forward compatibility.
 
 At this stage, another Arrow ecosystem implementation should theoretically be able to read ArrowBound semantics without Python or Pydantic.
 
+## V0.6 — Optional Pandera dataframe validation
+
+Add an optional Pandera integration that lets Pandera take over efficient dataframe/table validation while ArrowBound remains the single source of truth for the contract.
+
+The primary API should be:
+
+```python
+class Customer(BaseModel):
+    id: int
+    age: Annotated[int, Field(ge=0, le=150)]
+
+pandera_schema = Customer.pandera_schema()
+validated = pandera_schema.validate(table)
+```
+
+`pandera_schema()` should compile the ArrowBound model into Pandera's underlying schema/check representation for the PyArrow backend. It should not require users to maintain a separate Pandera `DataFrameModel` class.
+
+The intended division of responsibility is:
+
+```text
+ArrowBound model
+      │
+      ├── Pydantic record validation at ingress
+      ├── pyarrow.Schema + portable constraint metadata
+      └── pandera_schema()
+                │
+                ▼
+             Pandera
+                │
+                ▼
+       dataframe/table validation
+```
+
+ArrowBound continues to define and transport the contract. Pandera becomes an optional execution backend for validating already-columnar data against the applicable portions of that contract.
+
+The integration should compile from ArrowBound's normalized constraint representation rather than independently reinterpreting Pydantic fields. This keeps one source of truth:
+
+```text
+Pydantic declaration
+        ↓
+ArrowBound normalized contract
+        ├────────► Arrow metadata
+        └────────► Pandera checks
+```
+
+Pandera should remain an optional dependency, likely through an extra such as `arrowbound[pandera]`. Core ArrowBound must not require Pandera.
+
+The adapter should clearly classify semantics that Pandera can enforce, cannot enforce, or that require custom checks. Unsupported translations must fail or report explicitly rather than silently dropping constraints.
+
+ArrowBound should not duplicate Pandera's dataframe-validation capabilities. Features such as vectorized column checks, dataframe-wide checks, uniqueness scans, lazy aggregation of validation failures, and other bulk validation behavior should remain Pandera's responsibility.
+
 ## V0.9 — Release audit
 
-Before 1.0:
-
-- audit every relevant PyArrow datatype,
-- audit every applicable Pydantic declarative constraint,
-- verify all default mappings are documented and tested,
-- verify all metadata-bearing features survive IPC round trips,
-- verify minimum/latest PyArrow CI,
-- verify error diagnostics for missing runtime capabilities,
-- document intentional unsupported cases,
-- eliminate unexplained support gaps.
+Before 1.0, audit every relevant PyArrow datatype and applicable Pydantic declarative constraint; verify default mappings, metadata IPC round trips, boundary validation, minimum/latest PyArrow CI, diagnostics, and intentional unsupported cases; eliminate unexplained gaps. The Pandera integration may mature independently and must not block the core substrate if its dependency/API stability requires more time.
 
 ## V1.0 — Stable substrate
 
-1.0 means the core data-contract substrate is stable.
+1.0 means the core data-contract substrate is stable: deterministic defaults, complete capability classifications, stable explicit PyArrow authoring, reliable runtime compatibility, enforced Pydantic ingress constraints, stable portable metadata, deterministic schemas, and ordinary Apache Arrow interoperability.
 
-### Types
-
-Every built-in schema-definable datatype available in supported PyArrow environments has a known capability classification. No accidental support gaps remain.
-
-### Defaults
-
-Every supported ordinary Python annotation has a deterministic documented Arrow default covered by compatibility tests.
-
-### Escape hatches
-
-Users can request exact Arrow representations when Python defaults are insufficient, and direct `pyarrow.DataType` use remains possible where safe.
-
-### Runtime compatibility
-
-ArrowBound dynamically detects installed PyArrow capabilities. Missing capabilities produce actionable errors rather than silent substitutions.
-
-### Constraints
-
-Every applicable Pydantic declarative constraint has a known portability classification. Portable constraints use stable versioned metadata.
-
-### Determinism
-
-Equivalent ArrowBound definitions generate equivalent Arrow schemas and metadata.
-
-### Portability
-
-Generated schemas remain ordinary Apache Arrow schemas. Consumers unaware of ArrowBound can still understand native Arrow structure; ArrowBound-aware consumers can additionally interpret portable constraints and metadata.
+The optional Pandera integration provides a natural dataframe-validation path but does not redefine ArrowBound's core responsibility.
 
 ## Post-1.0 discipline
 
-ArrowBound should resist feature expansion outside contract definition. Potential future features should be rejected or split into separate packages when they belong to execution engines, registries, storage systems, migrations, or framework integrations.
+ArrowBound should resist feature expansion outside contract definition and boundary validation. Execution features should normally be delegated to mature consumers such as Pandera rather than recreated in ArrowBound.
 
-The core product definition remains:
+The core product remains a constrained Pydantic model system for defining validated, portable Apache Arrow data contracts.
 
-> **A constrained Pydantic model system for defining portable Apache Arrow data contracts.**
-
-And the guiding rule remains:
-
-> **Natural when possible. Explicit when necessary. Portable always.**
+> **Validate at the boundary. Preserve the contract. Transport with Arrow.**
